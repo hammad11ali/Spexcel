@@ -1,4 +1,5 @@
 
+import string
 import pyexcel
 import sys
 import pyexcel_xlsx
@@ -9,12 +10,13 @@ os.system('cls')
 
 print("\n\n***Welcome to Spool to Excel Parser and Converter***\n\n")
 
-if len(sys.argv) < 2:
-    print('Please provide spool file name with extension')
-    print('Format: Parser filename')
-    sys.exit()
+# if len(sys.argv) < 2:
+#     print('Please provide spool file name with extension')
+#     print('Format: Parser filename')
+#     sys.exit()
 try:
     file = open(sys.argv[1], 'r')
+    # file = open('test.SPL', 'r')
 except:
     print('File not found')
     sys.exit()
@@ -28,44 +30,90 @@ query = ""
 header = ""
 rows = []
 final = []
-once = False
-read = False
+states = ['QUERY', 'HEADER', 'DASHES', 'DATA']
+state = states[0]
+headings = []
+row_data = []
+dashes = []
+endline = False
 while True:
     line = file.readline()
     if not line:
         break
-    if line.startswith('SQL>'):
-        new = True
-        data = False
-        if rows:
-            rows.remove(rows[0])
-        final.append((query, header, rows))
-        query = ""
-        header = ""
-        rows = []
-    if new:
-        query += ' '+line
-        if line == "\n":
-            new = False
-            data = True
-            once = False
+    if state == 'QUERY':
+        if line == '\n':
+            state = states[1]
             continue
-        continue
-    if data:
-        if line == "\n" and once == False:
-            once = True
+        if line.startswith('SQL>'):
+            query = line
             continue
-        if once and line == "\n":
-            continue
-        if header == "":
-            header = line
         else:
-            if not line.count(" selected") and not line.count("old:") and not line.count("new:"):
-                rows.append(line)
-if rows:
-    rows.remove(rows[0])
-final.append((query, header, rows))
-final.remove(final[0])
+            query += ' '+line
+            continue
+    if state == 'HEADER':
+        if line.count('no rows selected.') > 0:
+            state = states[0]
+            continue
+        # if line contain --- then header has ended
+        if line.startswith('---'):
+            state = states[2]
+            headings = header.split(';')
+            headings = [x.strip() for x in headings]
+            dashes = line.split(';')
+            continue
+        else:
+            header += ' '+line
+            continue
+    if state == 'DASHES':
+        if line.count('no rows selected.') > 0:
+            state = states[0]
+            continue
+        if line.startswith('---'):
+            dashes = dashes[:]+line.split(';')
+            if len(dashes) == len(headings):
+                state = states[3]
+                dashes = []
+            continue
+        else:
+            state = states[3]
+            row_data = line.split(';')
+            row_data = [x.strip() for x in row_data]
+            if len(row_data) == len(headings):
+                rows.append(row_data)
+                row_data = []
+            continue
+    if state == 'DATA':
+        if line.count("rows selected.") > 0:
+            state = states[0]
+            endline = False
+            final.append((query, headings, rows))
+            query = ""
+            header = ""
+            rows = []
+            headings = []
+        if line == "\n" and endline == False:
+            endline = True
+            continue
+        elif endline and line == "\n":
+            state = states[0]
+            endline = False
+            final.append((query, headings, rows))
+            query = ""
+            header = ""
+            rows = []
+            headings = []
+            continue
+        else:
+            row_data = line.split(';')
+            row_data = [x.strip() for x in row_data]
+            if len(row_data) == len(headings):
+                rows.append(row_data)
+                row_data = []
+            continue
+
+
+if query != "":
+    final.append((query, headings, rows))
 file.close()
 
 print('Data Parsing complete')
@@ -77,14 +125,11 @@ for statement in final:
     query, header, rows = statement
     if len(rows) == 0:
         sheet1.append([query])
-        sheet1.append([header])
-        sheet1.append([])
         continue
     sheet = [query.upper()]
-    header = [value.strip() for value in header.split(';')]
+    header = [value.strip() for value in header]
     sheet.append(header)
     for row in rows:
-        row = [value.strip() for value in row.split(';')]
         sheet.append(row)
     sheets.append(sheet)
 
@@ -99,6 +144,7 @@ for sheet in sheets:
     workbook[name] = sheet[1:]
     counter += 1
 filename = sys.argv[1].split('.')[0]+str(int(time.time()))+'.xlsx'
+# filename = 'test'+str(int(time.time()))+'.xlsx'
 print('Saving to file '+filename)
 filename = os.getcwd()+'\\'+filename
 pyexcel.save_book_as(bookdict=workbook, dest_file_name=filename)
